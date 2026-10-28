@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Haul Truck Load Counter</title>
+<meta name="theme-color" content="#121212">
+<!-- Lets iPhone run it full-screen from the home screen, like an app. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Load Counter">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root { --bg: #121212; --amber: #FFB300; --green: #2E7D32; --red: #C62828; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: #fff;
+    font-family: system-ui, -apple-system, Roboto, sans-serif; }
+  body { padding: calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 24px);
+    max-width: 520px; margin: 0 auto; position: relative; text-align: center;
+    -webkit-user-select: none; user-select: none; }
+  /* Dimmed truck photo behind the count, faded into the background at its edges. */
+  .photo { position: absolute; left: 0; right: 0; top: calc(env(safe-area-inset-top) + 60px); z-index: -1; }
+  .photo img { width: 100%; display: block; opacity: .45; }
+  .photo::after { content: ""; position: absolute; inset: 0;
+    background: linear-gradient(var(--bg) 0%, transparent 25%, transparent 70%, var(--bg) 100%); }
+  body { isolation: isolate; }
+  h1 { font-size: 28px; margin: 0; }
+  #total { font-size: 120px; font-weight: 700; color: var(--amber); line-height: 1.2; }
+  #today { font-size: 26px; }
+  button { font: inherit; color: #fff; border-radius: 16px; cursor: pointer; touch-action: manipulation; }
+  button:disabled { opacity: .35; }
+  #add { display: block; width: 100%; min-height: 130px; margin-top: 24px; border: 0;
+    background: var(--green); font-size: 44px; font-weight: 900; }
+  #add:active { filter: brightness(1.25); }
+  .row { display: flex; gap: 12px; margin-top: 16px; }
+  .row button { flex: 1; min-height: 64px; background: transparent; border: 2px solid #777; font-size: 20px; }
+  h2 { font-size: 22px; text-align: left; margin: 28px 0 8px; }
+  #recent { list-style: none; padding: 0; margin: 0; text-align: left; font-family: ui-monospace, Menlo, monospace;
+    font-size: 17px; color: #ccc; }
+  #recent li { padding: 4px 0; }
+  hr { border: 0; border-top: 1px solid #333; margin: 40px 0 24px; }
+  #reset { width: 100%; min-height: 56px; border: 0; background: var(--red); font-size: 20px; }
+  dialog { background: #2a2a2a; color: #fff; border: 0; border-radius: 20px; padding: 24px; width: min(90vw, 400px); }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog p { font-size: 20px; margin: 0 0 24px; }
+  dialog .row button { border-color: #555; }
+  #confirmYes { background: var(--red); border-color: var(--red); }
+  #toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 32px); transform: translateX(-50%);
+    background: #333; padding: 12px 20px; border-radius: 24px; font-size: 17px; opacity: 0; transition: opacity .3s;
+    pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <div class="photo"><img src="truck.jpg" alt=""></div>
+  <h1>Haul Truck Load Counter</h1>
+  <div id="total">0</div>
+  <div id="today">Today: 0</div>
+
+  <button id="add">+1 LOAD</button>
+  <div class="row">
+    <button id="undo">Undo last</button>
+    <button id="export">Export CSV</button>
+  </div>
+
+  <h2>Recent loads</h2>
+  <ul id="recent"></ul>
+
+  <hr>
+  <button id="reset">Reset all</button>
+
+  <dialog id="confirm">
+    <p id="confirmText"></p>
+    <div class="row">
+      <button id="confirmNo">Cancel</button>
+      <button id="confirmYes">OK</button>
+    </div>
+  </dialog>
+  <div id="toast"></div>
+
+<script>
+  // Loads are epoch milliseconds, oldest first, stored in this browser only.
+  const KEY = 'loads';
+  const $ = id => document.getElementById(id);
+
+  function getLoads() {
+    try {
+      const v = JSON.parse(localStorage.getItem(KEY) || '[]');
+      return Array.isArray(v) ? v.filter(Number.isFinite) : [];
+    } catch { return []; }
+  }
+  function saveLoads(loads) { localStorage.setItem(KEY, JSON.stringify(loads)); }
+
+  const pad = n => String(n).padStart(2, '0');
+  const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const csvTime = d => `${ymd(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const displayTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+  function render() {
+    const loads = getLoads();
+    const today = ymd(new Date());
+    $('total').textContent = loads.length;
+    $('today').textContent = 'Today: ' + loads.filter(t => ymd(new Date(t)) === today).length;
+    $('undo').disabled = loads.length === 0;
+    const items = loads.map((t, i) => [i + 1, t]).slice(-10).reverse();
+    $('recent').innerHTML = items.length
+      ? items.map(([n, t]) => `<li>#${n}&nbsp;&nbsp;${displayTime.format(new Date(t))}</li>`).join('')
+      : '<li style="color:#888;font-family:inherit">No loads yet</li>';
+  }
+
+  function toast(msg) {
+    const el = $('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => el.classList.remove('show'), 2000);
+  }
+
+  function confirmBox(message, okText, onYes) {
+    $('confirmText').textContent = message;
+    $('confirmYes').textContent = okText;
+    $('confirmYes').onclick = () => { $('confirm').close(); onYes(); };
+    $('confirm').showModal();
+  }
+  $('confirmNo').onclick = () => $('confirm').close();
+
+  $('add').onclick = () => {
+    saveLoads([...getLoads(), Date.now()]);
+    // Vibration works on Android browsers; iPhone Safari does not support it.
+    if (navigator.vibrate) navigator.vibrate(60);
+    render();
+  };
+
+  $('undo').onclick = () => confirmBox('Remove the last load?', 'Remove', () => {
+    saveLoads(getLoads().slice(0, -1));
+    render();
+  });
+
+  $('reset').onclick = () => confirmBox('Erase ALL loads? This cannot be undone.', 'Erase all', () => {
+    localStorage.removeItem(KEY);
+    render();
+  });
+
+  $('export').onclick = async () => {
+    const rows = getLoads().map((t, i) => `${i + 1},${csvTime(new Date(t))}`);
+    const csv = ['Load Number,Date and Time', ...rows].join('\n') + '\n';
+    const name = `loads_${ymd(new Date())}.csv`;
+    const file = new File([csv], name, { type: 'text/csv' });
+    // On iPhone the share sheet offers "Save to Files"; elsewhere fall back to a download.
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); toast('Export ready'); }
+      catch (e) { if (e.name !== 'AbortError') toast('Export failed'); }
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('Export successful');
+  };
+
+  // Keep "Today" right after midnight and when coming back to the app.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+  setInterval(render, 60000);
+
+  // Ask the browser not to clear our data when space runs low.
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+  // Offline support: cache the app files so it opens with no signal.
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+
+  render();
+</script>
+</body>
+</html>
