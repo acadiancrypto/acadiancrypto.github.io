@@ -8,11 +8,12 @@ import androidx.compose.ui.graphics.Color
 val Amber = Color(0xFFFFB300)
 val LoadGreen = Color(0xFF2E7D32)
 val DangerRed = Color(0xFFC62828)
+val Background = Color(0xFF121212)
 
 private val DarkColors = darkColorScheme(
     primary = Amber,
-    background = Color(0xFF121212),
-    surface = Color(0xFF121212),
+    background = Background,
+    surface = Background,
 )
 
 @Composable
